@@ -1,3 +1,16 @@
+// Welcome to this probably very badly written code to some but hey it works :)
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+__global__ void applyConvolution(unsigned char* image, unsigned char* output, int width, int height, int channels, float *kernel);
+__global__ void applyMaxPooling(unsigned char* image, unsigned char* output, int width, int height, int channels);
+__global__ void applyAveragePooling(unsigned char* image, unsigned char* output, int width, int height, int channels);
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         printf("Usage: %s <image_path>\n", argv[0]);
@@ -20,7 +33,7 @@ int main(int argc, char* argv[]) {
     }
     char outputPrefix[256];
     strncpy(outputPrefix, imageFileName, strlen(imageFileName) - 4);
-    outputPrefix[strlen(imageFileName) - 4] = '\0'();
+    outputPrefix[strlen(imageFileName) - 4] = '\0';
 
     // Define block and grid sizes
     dim3 blockSize(16, 16);
@@ -104,129 +117,91 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
+// Kernel for convolution operation
+__global__ void applyConvolution(unsigned char* image, unsigned char* output, int width, int height, int channels, float *kernel) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if(x >= width || y >= height) return; // Ensure we don't go out of bounds
 
+    int edge = 1; // Kernel size is 3x3, so edge is 1
+    float sum[3] = {0.0, 0.0, 0.0};
 
+    // Apply convolution filter
+    for (int ky = -edge; ky <= edge; ky++) {
+        for (int kx = -edge; kx <= edge; kx++) {
+            int ix = x + kx;
+            int iy = y + ky;
+            if (ix >= 0 && ix < width && iy >= 0 && iy < height) {
+                for (int ch = 0; ch < channels; ch++) {
+                    if (ch < 3) { // Apply convolution only to RGB channels
+                        sum[ch] += kernel[(ky + edge) * 3 + (kx + edge)] * image[(iy * width + ix) * channels + ch];
+                    }
+                }
+            }
+        }
+    }
+    // Save the result back to the output image
+    for (int ch = 0; ch < channels; ch++) {
+        if (ch < 3) {
+            int val = (int)sum[ch];
+            output[(y * width + x) * channels + ch] = (unsigned char)(val > 255 ? 255 : (val < 0 ? 0 : val));
+        } else {
+            output[(y * width + x) * channels + ch] = image[(y * width + x) * channels + ch];
+        }
+    }
+}
 
+// Kernel for max pooling operation
+__global__ void applyMaxPooling(unsigned char* image, unsigned char* output, int width, int height, int channels) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if(x >= width || y >= height) return; // Ensure we don't go out of bounds
 
+    int outputWidth = width / 2;
+    int outputHeight = height / 2;
 
+    // Apply max pooling filter
+    for (int y = 0; y < outputHeight; y++) {
+        for (int x = 0; x < outputWidth; x++) {
+            for (int ch = 0; ch < channels; ch++) {
+                unsigned char maxVal = 0;
+                for (int dy = 0; dy < 2; dy++) {
+                    for (int dx = 0; dx < 2; dx++) {
+                        int iy = y * 2 + dy;
+                        int ix = x * 2 + dx;
+                        unsigned char val = image[(iy * width + ix) * channels + ch];
+                        if (val > maxVal) maxVal = val;
+                    }
+                }
+                output[(y * outputWidth + x) * channels + ch] = maxVal;
+            }
+        }
+    }
+}
 
+// Kernel for average pooling operation
+__global__ void applyAveragePooling(unsigned char* image, unsigned char* output, int width, int height, int channels) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if(x >= width || y >= height) return; // Ensure we don't go out of bounds
 
+    int outputWidth = width / 2;
+    int outputHeight = height / 2;
 
-To accommodate the changes in the main.cu file in your notebook, you need to modify how you call the CUDA program so that it no longer expects the output prefix argument. Here are the specific changes needed:
-
-Update the Notebook Code
-Original Code to Run the CUDA Program:
-python
-Copy code
-# Run the CUDA program on each image
-for image in images:
-    input_path = os.path.join(input_dir, image)
-    output_prefix = os.path.splitext(image)[0]
-    subprocess.run(['./main', input_path, output_prefix])
-Change to:
-python
-Copy code
-# Run the CUDA program on each image
-for image in images:
-    input_path = os.path.join(input_dir, image)
-    subprocess.run(['./main', input_path])
-Updated Notebook Code
-Here is the complete updated section of the notebook that includes the changes to compile and run the CUDA program:
-
-python
-Copy code
-import os
-import subprocess
-
-# Create directories
-os.makedirs('input', exist_ok=True)
-os.makedirs('output', exist_ok=True)
-
-# Download images into the input directory
-!wget -O input/darth.png https://raw.githubusercontent.com/driesnuttin25/Hardware_Accelerated_Computing/main/convolution/input/darth.png
-
-# Compile the CUDA program
-!nvcc main.cu -o main
-
-# Get all images in the input directory
-input_dir = 'input'
-output_dir = 'output'
-images = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
-
-# Run the CUDA program on each image
-for image in images:
-    input_path = os.path.join(input_dir, image)
-    subprocess.run(['./main', input_path])
-Update the profiling and detailed analysis sections:
-python
-Copy code
-import os
-import subprocess
-
-# Download the image
-!wget -O input/darth.png https://raw.githubusercontent.com/driesnuttin25/Hardware_Accelerated_Computing/main/convolution/input/darth.png
-
-# Compile the CUDA program
-subprocess.run(['nvcc', 'main.cu', '-o', 'main'], check=True)
-
-# Define input and output directories
-input_dir = 'input'
-output_dir = 'output'
-
-# Ensure the output directory exists
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
-
-# Set the image file name
-image = 'darth.png'
-input_path = os.path.join(input_dir, image)
-
-# Use Nsight Systems to profile the application and generate a .qdstrm file
-subprocess.run(['nsys', 'profile', '-o', 'profile_output', './main', input_path], check=True)
-python
-Copy code
-import os
-import subprocess
-import time
-
-# Function to print and run commands with timing and error handling
-def run_command(command, description):
-    print(f"Running: {description}")
-    start_time = time.time()
-    try:
-        result = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        end_time = time.time()
-        print(f"Completed: {description} in {end_time - start_time:.2f} seconds")
-        print("Standard Output:\n", result.stdout)
-        print("Standard Error:\n", result.stderr)
-        return result
-    except subprocess.CalledProcessError as e:
-        end_time = time.time()
-        print(f"Error: {description} failed after {end_time - start_time:.2f} seconds")
-        print(f"Command '{e.cmd}' returned non-zero exit status {e.returncode}")
-        print(f"Standard Output:\n{e.stdout}")
-        print(f"Standard Error:\n{e.stderr}")
-        return e
-
-# Ensure input and output directories exist
-input_dir = 'input'
-output_dir = 'output'
-if not os.path.exists(input_dir):
-    os.makedirs(input_dir)
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
-
-# Download the image
-print("Downloading the image...")
-!wget -O input/darth.png https://raw.githubusercontent.com/driesnuttin25/Hardware_Accelerated_Computing/main/convolution/input/darth.png
-
-# Compile the CUDA program
-run_command(['nvcc', 'main.cu', '-o', 'main'], "Compiling the CUDA program")
-
-# Set the image file name
-image = 'darth.png'
-input_path = os.path.join(input_dir, image)
-
-# Run Nsight Compute for detailed kernel analysis with full metrics
-run_command(['ncu', '--set', 'full', '--export', 'nsight_compute_report', './main', input_path], "Running Nsight Compute")
-These changes will ensure that your notebook correctly compiles and runs the CUDA program without requiring an output prefix, and all outputs will be saved to the output folder based on the image file names.
+    // Apply average pooling filter
+    for (int y = 0; y < outputHeight; y++) {
+        for (int x = 0; x < outputWidth; x++) {
+            for (int ch = 0; ch < channels; ch++) {
+                unsigned int sum = 0;
+                for (int dy = 0; dy < 2; dy++) {
+                    for (int dx = 0; dx < 2; dx++) {
+                        int iy = y * 2 + dy;
+                        int ix = x * 2 + dx;
+                        sum += image[(iy * width + ix) * channels + ch];
+                    }
+                }
+                output[(y * outputWidth + x) * channels + ch] = sum / 4;
+            }
+        }
+    }
+}
